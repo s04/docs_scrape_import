@@ -1,3 +1,5 @@
 openai
 qdrant-client
 gitpython
+deeplake
+# deeplake-docrag: https://github.com/activeloopai/docs-gitbook
