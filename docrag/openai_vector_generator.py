@@ -1,14 +1,16 @@
 import os
-from openai import OpenAI
+import asyncio
+from openai import AsyncOpenAI
 from typing import List, Dict
 import time
+from tqdm import tqdm
 
 # Initialize the OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def generate_embedding(text: str) -> List[float]:
+async def generate_embedding(text: str) -> List[float]:
     try:
-        response = client.embeddings.create(
+        response = await client.embeddings.create(
             input=text,
             model="text-embedding-ada-002"
         )
@@ -16,26 +18,36 @@ def generate_embedding(text: str) -> List[float]:
     except Exception as e:
         if "Rate limit" in str(e):
             print("Rate limit exceeded. Waiting for 20 seconds.")
-            time.sleep(20)
-            return generate_embedding(text)
+            await asyncio.sleep(20)
+            return await generate_embedding(text)
         else:
             print(f"An error occurred: {e}")
             return []
 
-def process_chunks(chunks: List[Dict]) -> List[Dict]:
-    processed_chunks = []
-    for chunk in chunks:
-        embedding = generate_embedding(chunk['text'])
-        if embedding:
-            processed_chunks.append({
-                'text': chunk['text'],
-                'metadata': chunk['metadata'],
-                'vector': embedding
-            })
-    return processed_chunks
+async def process_single_chunk(chunk: Dict) -> Dict:
+    embedding = await generate_embedding(chunk['text'])
+    if embedding:
+        return {
+            'text': chunk['text'],
+            'metadata': chunk['metadata'],
+            'vector': embedding
+        }
+    return None
 
-if __name__ == "__main__":
-    # Assume chunks is the list of processed chunks from the previous script
-    chunks = [...]  # List of chunks from markdown processor
-    vectorized_chunks = process_chunks(chunks)
-    print(f"Generated embeddings for {len(vectorized_chunks)} chunks.")
+async def process_chunks(chunks: List[Dict]) -> List[Dict]:
+    # Process chunks in batches of 100 for better performance
+    batch_size = 100
+    processed_chunks = []
+    
+    with tqdm(total=len(chunks), desc="Generating embeddings") as pbar:
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            # Create tasks for the batch
+            tasks = [process_single_chunk(chunk) for chunk in batch]
+            # Process batch concurrently
+            results = await asyncio.gather(*tasks)
+            # Filter out None results and add to processed chunks
+            processed_chunks.extend([r for r in results if r is not None])
+            pbar.update(len(batch))
+    
+    return processed_chunks
